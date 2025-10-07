@@ -1,226 +1,280 @@
-// Add this system prompt with your information
-const DEVELOPER_SYSTEM_PROMPT = `You are an AI voice assistant created by Shone (GitHub: shawnhhh-ux). 
-If anyone asks about:
-- Who created you
-- Who developed you
-- Who made you
-- Who your developer is
-- About Shone
-- About shawnhhh-ux
-- Who is behind this app
-
-Always respond with: "I was created by Shone (GitHub: shawnhhh-ux). He's an awesome developer who built this AI voice assistant! You can check out his projects on GitHub at github.com/shawnhhh-ux."
-
-For all other questions, respond normally as an AI assistant.`;
-
 const axios = require('axios');
 
+/**
+ * OpenRouter Service for AI Voice Assistant
+ * Developed by: shone (GitHub: shawnhhh-ux)
+ * Repository: https://github.com/shawnhhh-ux/ai-voice-assistant
+ * 
+ * This service handles communication with OpenRouter AI API
+ * for processing chat messages and generating AI responses.
+ */
+
 class OpenRouterService {
-  constructor(conversationService) {
-    this.conversationService = conversationService;
-    this.apiKey = process.env.OPENROUTER_API_KEY;
-    this.baseURL = process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1';
-    this.model = process.env.OPENROUTER_MODEL || 'mistralai/mistral-nemo:free';
-    
-    if (!this.apiKey) {
-      throw new Error('OPENROUTER_API_KEY is required in environment variables');
-    }
-
-    // Initialize axios client
-    this.client = axios.create({
-      baseURL: this.baseURL,
-      headers: {
-        'Authorization': `Bearer ${this.apiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': process.env.SERVER_URL || 'https://your-app-name.onrender.com',
-        'X-Title': 'AI Voice Assistant'
-      },
-      timeout: 30000 // 30 seconds
-    });
-
-    console.log('OpenRouter Service initialized with model:', this.model);
-  }
-
-  async sendMessage({ message, conversationId }) {
-    try {
-      // Get conversation history
-      const conversationHistory = this.conversationService.getConversation(conversationId) || [];
-
-
- // Add the developer system prompt
-         messages.push({
-         role: 'system',
-         content: DEVELOPER_SYSTEM_PROMPT
-            });
- 
-      // Prepare messages array
-      const messages = [];
-      
-      // Add system message for context
-      messages.push({
-        role: 'system',
-        content: `You are a helpful AI voice assistant. Be concise, conversational, and helpful. 
-                 Respond in a way that's easy to understand when spoken aloud. 
-                 Keep responses under 200 words unless specifically asked for more detail.`
-      });
-
-      // Add conversation history (last 10 messages to manage token count)
-      const recentHistory = conversationHistory.slice(-10);
-      recentHistory.forEach(msg => {
-        messages.push({
-          role: msg.role,
-          content: msg.content
-        });
-      });
-
-      // Add the current user message
-      messages.push({
-        role: 'user',
-        content: message
-      });
-
-      const requestBody = {
-        model: this.model,
-        messages: messages,
-        max_tokens: 500,
-        temperature: 0.7,
-        top_p: 0.9,
-        stream: false
-      };
-
-      console.log(`Sending request to Open Router: ${message.substring(0, 100)}...`);
-
-      const response = await this.client.post('/chat/completions', requestBody);
-
-      if (!response.data.choices || !response.data.choices[0]) {
-        throw new Error('Invalid response format from Open Router');
-      }
-
-      const aiResponse = response.data.choices[0].message.content;
-
-      console.log(`Open Router response received: ${aiResponse.substring(0, 100)}...`);
-
-      return {
-        response: aiResponse,
-        conversationId: conversationId,
-        usage: response.data.usage,
-        model: response.data.model
-      };
-
-    } catch (error) {
-      console.error('Open Router API Error:', error.response?.data || error.message);
-      
-      // Enhanced error handling
-      if (error.response?.status === 401) {
-        throw new Error('Invalid Open Router API key. Please check your API key.');
-      } else if (error.response?.status === 429) {
-        throw new Error('Rate limit exceeded for Open Router. Please try again later.');
-      } else if (error.code === 'ECONNABORTED') {
-        throw new Error('Open Router request timeout. Please try again.');
-      } else if (error.response?.status >= 500) {
-        throw new Error('Open Router service is temporarily unavailable. Please try again later.');
-      } else {
-        throw new Error(`Open Router service error: ${error.message}`);
-      }
-    }
-  }
-
-  async streamMessage({ message, conversationId, onChunk, onComplete, onError }) {
-    try {
-      const conversationHistory = this.conversationService.getConversation(conversationId) || [];
-      
-      const messages = [
-        {
-          role: 'system',
-          content: 'You are a helpful AI voice assistant. Be conversational and concise.'
-        },
-        ...conversationHistory.slice(-10).map(msg => ({
-          role: msg.role,
-          content: msg.content
-        })),
-        {
-          role: 'user',
-          content: message
-        }
-      ];
-
-      const requestBody = {
-        model: this.model,
-        messages: messages,
-        max_tokens: 500,
-        temperature: 0.7,
-        stream: true
-      };
-
-      const response = await this.client.post('/chat/completions', requestBody, {
-        responseType: 'stream'
-      });
-
-      let fullResponse = '';
-
-      response.data.on('data', (chunk) => {
-        const lines = chunk.toString().split('\n');
+    constructor() {
+        this.apiKey = process.env.OPENROUTER_API_KEY;
+        this.baseURL = process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1';
+        this.model = process.env.OPENROUTER_MODEL || 'mistralai/mistral-nemo:free';
         
-        for (const line of lines) {
-          if (line.startsWith('data: ') && !line.includes('[DONE]')) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              const content = data.choices[0]?.delta?.content;
-              
-              if (content) {
-                fullResponse += content;
-                onChunk(content);
-              }
-            } catch (e) {
-              // Ignore parsing errors for incomplete chunks
-            }
-          }
+        if (!this.apiKey) {
+            throw new Error('OPENROUTER_API_KEY is required in environment variables');
         }
-      });
 
-      response.data.on('end', () => {
-        onComplete({
-          fullResponse,
-          conversationId: conversationId
+        // Developer information for API attribution
+        this.developerInfo = {
+            name: 'shone',
+            github: 'shawnhhh-ux',
+            repository: 'https://github.com/shawnhhh-ux/ai-voice-assistant',
+            project: 'AI Voice Assistant',
+            contact: 'GitHub: shawnhhh-ux'
+        };
+
+        this.client = axios.create({
+            baseURL: this.baseURL,
+            headers: {
+                'Authorization': `Bearer ${this.apiKey}`,
+                'Content-Type': 'application/json',
+                'HTTP-Referer': process.env.SERVER_URL || 'https://ai-voice-backend-apq3.onrender.com', // UPDATE THIS!
+                'X-Title': 'AI Voice Assistant by shone',
+                'X-Developer': 'shone (GitHub: shawnhhh-ux)'
+            },
+            timeout: 30000
         });
-      });
 
-      response.data.on('error', (error) => {
-        onError(error);
-      });
-
-    } catch (error) {
-      onError(error);
+        console.log('OpenRouterService initialized by shone (GitHub: shawnhhh-ux)');
     }
-  }
 
-  // Method to get available models from Open Router
-  async getAvailableModels() {
-    try {
-      const response = await this.client.get('/models');
-      return response.data.data;
-    } catch (error) {
-      console.error('Error fetching models from Open Router:', error);
-      return [];
-    }
-  }
+    /**
+     * Send a message to OpenRouter and get AI response
+     * @param {Object} options - Message options
+     * @param {string} options.message - User message
+     * @param {string} options.conversationId - Conversation ID for context
+     * @param {string} options.systemPrompt - System prompt (optional)
+     * @returns {Promise<Object>} AI response
+     */
+    async sendMessage({ message, conversationId, systemPrompt }) {
+        try {
+            const messages = [];
 
-  // Health check for Open Router service
-  async healthCheck() {
-    try {
-      const models = await this.getAvailableModels();
-      return {
-        status: 'healthy',
-        modelsAvailable: models.length > 0,
-        defaultModel: this.model
-      };
-    } catch (error) {
-      return {
-        status: 'unhealthy',
-        error: error.message
-      };
+            // Add system prompt if provided
+            if (systemPrompt) {
+                messages.push({
+                    role: 'system',
+                    content: systemPrompt
+                });
+            }
+
+            // Add user message
+            messages.push({
+                role: 'user',
+                content: message
+            });
+
+            const requestBody = {
+                model: this.model,
+                messages: messages,
+                max_tokens: 1000,
+                temperature: 0.7,
+                stream: false
+            };
+
+            console.log(`🤖 [OpenRouter] Sending message: ${message.substring(0, 100)}...`);
+            console.log(`👨‍💻 Developer: shone (GitHub: shawnhhh-ux)`);
+
+            const response = await this.client.post('/chat/completions', requestBody);
+
+            const aiResponse = response.data.choices[0].message.content;
+
+            console.log(`✅ [OpenRouter] Response received: ${aiResponse.substring(0, 100)}...`);
+
+            return {
+                success: true,
+                data: {
+                    response: aiResponse,
+                    conversationId: conversationId || this.generateId(),
+                    usage: response.data.usage,
+                    model: response.data.model,
+                    developer: this.developerInfo
+                }
+            };
+
+        } catch (error) {
+            console.error('❌ [OpenRouter] API Error:', error.response?.data || error.message);
+            console.log(`👨‍💻 Developer: shone (GitHub: shawnhhh-ux) - Error occurred`);
+            
+            if (error.response?.status === 401) {
+                throw new Error('Invalid Open Router API key');
+            } else if (error.response?.status === 429) {
+                throw new Error('Rate limit exceeded for Open Router');
+            } else if (error.code === 'ECONNABORTED') {
+                throw new Error('Open Router request timeout');
+            } else {
+                throw new Error(`Open Router service error: ${error.message}`);
+            }
+        }
     }
-  }
+
+    /**
+     * Stream message for real-time responses
+     * @param {Object} options - Stream options
+     */
+    async streamMessage({ message, conversationId, onChunk, onComplete, onError }) {
+        try {
+            const messages = [{
+                role: 'user',
+                content: message
+            }];
+
+            const requestBody = {
+                model: this.model,
+                messages: messages,
+                max_tokens: 1000,
+                temperature: 0.7,
+                stream: true
+            };
+
+            console.log(`🔊 [OpenRouter] Streaming message...`);
+            console.log(`👨‍💻 Developer: shone (GitHub: shawnhhh-ux)`);
+
+            const response = await this.client.post('/chat/completions', requestBody, {
+                responseType: 'stream'
+            });
+
+            let fullResponse = '';
+
+            response.data.on('data', (chunk) => {
+                const lines = chunk.toString().split('\n');
+                
+                for (const line of lines) {
+                    if (line.startsWith('data: ') && !line.includes('[DONE]')) {
+                        try {
+                            const data = JSON.parse(line.slice(6));
+                            const content = data.choices[0]?.delta?.content;
+                            
+                            if (content) {
+                                fullResponse += content;
+                                onChunk(content);
+                            }
+                        } catch (e) {
+                            // Ignore parsing errors for incomplete chunks
+                        }
+                    }
+                }
+            });
+
+            response.data.on('end', () => {
+                console.log(`✅ [OpenRouter] Stream completed`);
+                onComplete({
+                    fullResponse,
+                    conversationId: conversationId || this.generateId(),
+                    developer: this.developerInfo
+                });
+            });
+
+            response.data.on('error', (error) => {
+                console.error('❌ [OpenRouter] Stream error:', error);
+                onError(error);
+            });
+
+        } catch (error) {
+            console.error('❌ [OpenRouter] Stream initialization error:', error);
+            onError(error);
+        }
+    }
+
+    /**
+     * Process audio data through OpenRouter
+     * @param {Object} options - Audio processing options
+     */
+    async processAudio({ audioData, sessionId }) {
+        try {
+            console.log(`🎵 [OpenRouter] Processing audio, session: ${sessionId}`);
+            console.log(`👨‍💻 Developer: shone (GitHub: shawnhhh-ux)`);
+            
+            // Note: OpenRouter primarily handles text, so you'd typically:
+            // 1. Convert audio to text first (using another service)
+            // 2. Then send text to OpenRouter
+            
+            // For now, we'll simulate audio processing
+            // In a real implementation, you'd integrate with a speech-to-text service
+            
+            const simulatedTranscription = "This is a simulated transcription of the audio input. In a real implementation, this would be converted from audio to text.";
+            
+            // Send transcribed text to OpenRouter
+            const aiResponse = await this.sendMessage({
+                message: simulatedTranscription,
+                sessionId: sessionId
+            });
+
+            return {
+                success: true,
+                data: {
+                    transcribedText: simulatedTranscription,
+                    aiResponse: aiResponse.data.response,
+                    sessionId: sessionId,
+                    developer: this.developerInfo
+                }
+            };
+
+        } catch (error) {
+            console.error('❌ [OpenRouter] Audio processing error:', error);
+            throw new Error(`Audio processing failed: ${error.message}`);
+        }
+    }
+
+    /**
+     * Get available models from OpenRouter
+     * @returns {Promise<Array>} List of available models
+     */
+    async getAvailableModels() {
+        try {
+            console.log(`📋 [OpenRouter] Fetching available models`);
+            console.log(`👨‍💻 Developer: shone (GitHub: shawnhhh-ux)`);
+
+            const response = await this.client.get('/models');
+            
+            console.log(`✅ [OpenRouter] Retrieved ${response.data.data.length} models`);
+            
+            return {
+                success: true,
+                data: {
+                    models: response.data.data,
+                    total: response.data.data.length,
+                    developer: this.developerInfo
+                }
+            };
+        } catch (error) {
+            console.error('❌ [OpenRouter] Error fetching models:', error);
+            return {
+                success: false,
+                error: 'Failed to fetch models',
+                developer: this.developerInfo
+            };
+        }
+    }
+
+    /**
+     * Get service status and information
+     * @returns {Object} Service information
+     */
+    getServiceInfo() {
+        return {
+            service: 'OpenRouter AI Service',
+            developer: this.developerInfo,
+            model: this.model,
+            baseURL: this.baseURL,
+            status: 'active',
+            features: ['chat', 'streaming', 'multiple-models'],
+            repository: 'https://github.com/shawnhhh-ux/ai-voice-assistant'
+        };
+    }
+
+    /**
+     * Generate a unique ID
+     * @returns {string} Unique ID
+     */
+    generateId() {
+        return `conv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    }
 }
 
 module.exports = OpenRouterService;
