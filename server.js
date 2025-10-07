@@ -6,416 +6,485 @@ const helmet = require('helmet');
 const compression = require('compression');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
-const winston = require('winston');
+const axios = require('axios');
 require('dotenv').config();
-const { router: openRouterRoutes } = require('./services/OpenRouterService');
 
-
-// Import services
-const OpenRouterService = require('./services/openRouterService');
-const ConversationService = require('./services/conversationService');
-
-// Import routes
-const chatRoutes = require('./routes/chat');
-const audioRoutes = require('./routes/audio');
-
-// Import middleware
-const { errorHandler } = require('./middleware/errorHandler');
-const { validateApiKey } = require('./middleware/auth');
-
-// Use OpenRouter routes
-app.use('/api/v1/chat', openRouterRoutes);
-
-
-// Logger configuration
-const logger = winston.createLogger({
-  level: 'info',
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.json()
-  ),
-  transports: [
-    new winston.transports.File({ filename: 'error.log', level: 'error' }),
-    new winston.transports.File({ filename: 'combined.log' }),
-    new winston.transports.Console({
-      format: winston.format.simple()
-    })
-  ]
-});
+/**
+ * AI Voice Assistant Backend Server
+ * Developed by: shone (GitHub: shawnhhh-ux)
+ * Repository: https://github.com/shawnhhh-ux/ai-voice-assistant
+ * 
+ * This server handles voice and text requests from the Android app
+ * and communicates with OpenRouter AI API for intelligent responses.
+ */
 
 class AIVoiceServer {
-  constructor() {
-    this.app = express();
-    this.server = http.createServer(this.app);
-    this.io = socketIo(this.server, {
-      cors: {
-        origin: process.env.ALLOWED_ORIGINS?.split(',') || ["https://your-app-name.onrender.com", "http://localhost:3001"],
-        methods: ["GET", "POST"],
-        credentials: true
-      }
-    });
-    
-    this.port = process.env.PORT || 3000;
-    this.conversationService = new ConversationService();
-    this.openRouterService = new OpenRouterService(this.conversationService);
-    
-    this.initializeMiddlewares();
-    this.initializeRoutes();
-    this.initializeWebSocket();
-    this.initializeErrorHandling();
-    
-    logger.info('AI Voice Server initialized');
-  }
-
-  initializeMiddlewares() {
-    // Security middleware
-    this.app.use(helmet({
-      crossOriginResourcePolicy: { policy: "cross-origin" }
-    }));
-
-    // CORS configuration
-    this.app.use(cors({
-      origin: process.env.ALLOWED_ORIGINS?.split(',') || ["https://your-app-name.onrender.com", "http://localhost:3001"],
-      credentials: true
-    }));
-
-    // Rate limiting - more generous for voice app
-    const limiter = rateLimit({
-      windowMs: 15 * 60 * 1000, // 15 minutes
-      max: 200, // Increased limit for voice interactions
-      message: {
-        error: 'Too many requests from this IP, please try again later.',
-        code: 'RATE_LIMIT_EXCEEDED'
-      },
-      standardHeaders: true,
-      legacyHeaders: false
-    });
-    this.app.use(limiter);
-
-    // Body parsing middleware with increased limits for audio
-    this.app.use(express.json({ limit: '10mb' }));
-    this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-    // Compression
-    this.app.use(compression());
-
-    // Logging
-    if (process.env.NODE_ENV !== 'production') {
-      this.app.use(morgan('dev'));
-    } else {
-      this.app.use(morgan('combined'));
+    constructor() {
+        this.app = express();
+        this.server = http.createServer(this.app);
+        this.io = socketIo(this.server, {
+            cors: {
+                origin: process.env.ALLOWED_ORIGINS?.split(',') || "*",
+                methods: ["GET", "POST"]
+            }
+        });
+        
+        this.port = process.env.PORT || 3000;
+        
+        this.initializeMiddlewares();
+        this.initializeRoutes();
+        this.initializeWebSocket();
+        this.initializeErrorHandling();
+        
+        console.log('🚀 AI Voice Assistant Server initialized');
+        console.log('👨‍💻 Developer: shone (GitHub: shawnhhh-ux)');
+        console.log('📚 Repository: https://github.com/shawnhhh-ux/ai-voice-assistant');
     }
 
-    // Static files (if needed)
-    this.app.use(express.static('public'));
-  }
+    initializeMiddlewares() {
+        // Security middleware
+        this.app.use(helmet({
+            crossOriginResourcePolicy: { policy: "cross-origin" }
+        }));
 
-  initializeRoutes() {
-    // Health check endpoint
-    this.app.get('/health', (req, res) => {
-      res.status(200).json({
-        status: 'OK',
-        timestamp: new Date().toISOString(),
-        uptime: process.uptime(),
-        environment: process.env.NODE_ENV,
-        version: '1.0.0'
-      });
-    });
+        // CORS configuration
+        this.app.use(cors({
+            origin: process.env.ALLOWED_ORIGINS?.split(',') || "*",
+            credentials: true
+        }));
 
-    // API routes
-    this.app.use('/api/v1/chat', validateApiKey, chatRoutes(this.openRouterService));
-    this.app.use('/api/v1/audio', validateApiKey, audioRoutes);
+        // Rate limiting
+        const limiter = rateLimit({
+            windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
+            max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
+            message: {
+                error: 'Too many requests from this IP, please try again later.'
+            }
+        });
+        this.app.use(limiter);
 
-    // Root endpoint
-    this.app.get('/', (req, res) => {
-      res.json({
-        message: '🚀 AI Voice Assistant Backend API',
-        version: '1.0.0',
-        endpoints: {
-          chat: '/api/v1/chat',
-          audio: '/api/v1/audio',
-          health: '/health',
-          websocket: '/ws'
-        },
-        documentation: 'See README for API documentation'
-      });
-    });
+        // Body parsing middleware
+        this.app.use(express.json({ limit: '10mb' }));
+        this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-    // 404 handler
-    this.app.use('*', (req, res) => {
-      res.status(404).json({
-        error: 'Endpoint not found',
-        path: req.originalUrl,
-        code: 'ENDPOINT_NOT_FOUND'
-      });
-    });
-  }
+        // Compression
+        this.app.use(compression());
 
-  initializeWebSocket() {
-    this.io.on('connection', (socket) => {
-      logger.info(`Client connected: ${socket.id}`);
-      
-      // Store conversation for this socket
-      const conversationId = `conv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      this.conversationService.createConversation(conversationId);
-
-      // Send welcome message with conversation ID
-      socket.emit('connected', { 
-        conversationId,
-        message: 'Connected to AI Voice Assistant',
-        timestamp: new Date().toISOString()
-      });
-
-      // Handle text chat messages
-      socket.on('chat_message', async (data) => {
-        try {
-          await this.handleChatMessage(socket, data, conversationId);
-        } catch (error) {
-          logger.error('Chat message error:', error);
-          socket.emit('error', { 
-            message: 'Failed to process message',
-            code: 'CHAT_PROCESSING_ERROR'
-          });
+        // Logging
+        if (process.env.NODE_ENV !== 'production') {
+            this.app.use(morgan('dev'));
+        } else {
+            this.app.use(morgan('combined'));
         }
-      });
 
-      // Handle audio stream data
-      socket.on('audio_stream', async (data) => {
-        try {
-          await this.handleAudioStream(socket, data, conversationId);
-        } catch (error) {
-          logger.error('Audio stream error:', error);
-          socket.emit('error', { 
-            message: 'Failed to process audio stream',
-            code: 'AUDIO_PROCESSING_ERROR'
-          });
+        // Static files
+        this.app.use(express.static('public'));
+    }
+
+    initializeRoutes() {
+        // Health check endpoint
+        this.app.get('/health', (req, res) => {
+            res.status(200).json({
+                status: 'OK',
+                timestamp: new Date().toISOString(),
+                uptime: process.uptime(),
+                environment: process.env.NODE_ENV,
+                developer: 'shone (GitHub: shawnhhh-ux)',
+                repository: 'https://github.com/shawnhhh-ux/ai-voice-assistant'
+            });
+        });
+
+        // Chat message endpoint
+        this.app.post('/api/v1/chat/message', async (req, res) => {
+            try {
+                const { message, conversationId } = req.body;
+
+                // Validate request
+                if (!message || typeof message !== 'string') {
+                    return res.status(400).json({
+                        success: false,
+                        error: 'Message is required and must be a string',
+                        code: 'INVALID_MESSAGE'
+                    });
+                }
+
+                if (message.length > 4000) {
+                    return res.status(400).json({
+                        success: false,
+                        error: 'Message too long. Maximum 4000 characters allowed.',
+                        code: 'MESSAGE_TOO_LONG'
+                    });
+                }
+
+                console.log(`Processing chat message: ${message.substring(0, 100)}...`);
+
+                // Get AI response from OpenRouter
+                const aiResponse = await this.getAIResponse(message, conversationId);
+
+                res.json({
+                    success: true,
+                    data: {
+                        response: aiResponse.response,
+                        conversationId: aiResponse.conversationId,
+                        usage: aiResponse.usage,
+                        model: aiResponse.model,
+                        timestamp: new Date().toISOString()
+                    }
+                });
+
+            } catch (error) {
+                console.error('Chat route error:', error);
+                
+                let statusCode = 500;
+                let errorMessage = 'Internal server error';
+
+                if (error.message.includes('API key')) {
+                    statusCode = 401;
+                    errorMessage = 'Authentication failed';
+                } else if (error.message.includes('Rate limit')) {
+                    statusCode = 429;
+                    errorMessage = 'Service temporarily unavailable due to rate limiting';
+                } else if (error.message.includes('timeout')) {
+                    statusCode = 504;
+                    errorMessage = 'Service timeout';
+                }
+
+                res.status(statusCode).json({
+                    success: false,
+                    error: errorMessage,
+                    details: process.env.NODE_ENV === 'development' ? error.message : undefined,
+                    code: `CHAT_ERROR_${statusCode}`
+                });
+            }
+        });
+
+        // Audio processing endpoint
+        this.app.post('/api/v1/audio/process', async (req, res) => {
+            try {
+                const { audioData, sessionId } = req.body;
+
+                // Validate request
+                if (!audioData || typeof audioData !== 'string') {
+                    return res.status(400).json({
+                        success: false,
+                        error: 'Audio data is required and must be a base64 string',
+                        code: 'INVALID_AUDIO_DATA'
+                    });
+                }
+
+                console.log(`Processing audio data, session: ${sessionId}, data length: ${audioData.length}`);
+
+                // Simulate audio processing and transcription
+                // In a real application, you would use a speech-to-text service here
+                const transcribedText = await this.simulateSpeechToText(audioData);
+
+                // Get AI response for the transcribed text
+                const aiResponse = await this.getAIResponse(transcribedText, sessionId);
+
+                res.json({
+                    success: true,
+                    data: {
+                        response: aiResponse.response,
+                        transcribedText: transcribedText,
+                        conversationId: aiResponse.conversationId,
+                        timestamp: new Date().toISOString()
+                    }
+                });
+
+            } catch (error) {
+                console.error('Audio processing error:', error);
+                
+                res.status(500).json({
+                    success: false,
+                    error: 'Audio processing failed',
+                    details: process.env.NODE_ENV === 'development' ? error.message : undefined,
+                    code: 'AUDIO_PROCESSING_ERROR'
+                });
+            }
+        });
+
+        // Root endpoint
+        this.app.get('/', (req, res) => {
+            res.json({
+                message: 'AI Voice Assistant Backend API',
+                version: '1.0.0',
+                developer: 'shone (GitHub: shawnhhh-ux)',
+                repository: 'https://github.com/shawnhhh-ux/ai-voice-assistant',
+                endpoints: {
+                    chat: '/api/v1/chat/message',
+                    audio: '/api/v1/audio/process',
+                    health: '/health',
+                    websocket: '/ws'
+                }
+            });
+        });
+
+        // 404 handler
+        this.app.use('*', (req, res) => {
+            res.status(404).json({
+                success: false,
+                error: 'Endpoint not found',
+                path: req.originalUrl
+            });
+        });
+    }
+
+    initializeWebSocket() {
+        this.io.on('connection', (socket) => {
+            console.log(`Client connected: ${socket.id}`);
+
+            // Handle real-time chat messages
+            socket.on('chat_message', async (data) => {
+                try {
+                    await this.handleChatMessage(socket, data);
+                } catch (error) {
+                    socket.emit('error', { message: 'Failed to process message' });
+                    console.error('Chat message error:', error);
+                }
+            });
+
+            // Handle audio streaming
+            socket.on('audio_stream', async (data) => {
+                try {
+                    await this.handleAudioStream(socket, data);
+                } catch (error) {
+                    socket.emit('error', { message: 'Failed to process audio' });
+                    console.error('Audio stream error:', error);
+                }
+            });
+
+            // Handle disconnection
+            socket.on('disconnect', (reason) => {
+                console.log(`Client disconnected: ${socket.id} - ${reason}`);
+            });
+
+            // Handle errors
+            socket.on('error', (error) => {
+                console.error(`Socket error for ${socket.id}:`, error);
+            });
+        });
+
+        console.log('WebSocket service initialized');
+    }
+
+    async handleChatMessage(socket, data) {
+        const { message, conversationId, messageId } = data;
+
+        // Validate input
+        if (!message || typeof message !== 'string') {
+            socket.emit('error', { message: 'Invalid message format' });
+            return;
         }
-      });
 
-      // Handle audio chunk (for real-time processing)
-      socket.on('audio_chunk', async (data) => {
+        // Send processing status
+        socket.emit('processing_start', { messageId });
+
         try {
-          await this.handleAudioChunk(socket, data, conversationId);
+            // Get AI response from OpenRouter
+            const aiResponse = await this.getAIResponse(message, conversationId);
+
+            // Send response back to client
+            socket.emit('chat_response', {
+                messageId,
+                response: aiResponse.response,
+                conversationId: aiResponse.conversationId,
+                timestamp: new Date().toISOString()
+            });
+
         } catch (error) {
-          logger.error('Audio chunk error:', error);
+            console.error('Open Router error:', error);
+            socket.emit('error', {
+                messageId,
+                error: 'Failed to get AI response',
+                details: error.message
+            });
         }
-      });
-
-      // Handle typing indicators
-      socket.on('typing_start', () => {
-        socket.broadcast.emit('user_typing', { userId: socket.id });
-      });
-
-      socket.on('typing_stop', () => {
-        socket.broadcast.emit('user_stopped_typing', { userId: socket.id });
-      });
-
-      // Handle disconnection
-      socket.on('disconnect', (reason) => {
-        logger.info(`Client disconnected: ${socket.id} - ${reason}`);
-        // Clean up conversation after delay
-        setTimeout(() => {
-          this.conversationService.deleteConversation(conversationId);
-        }, 300000); // 5 minutes
-      });
-
-      // Handle errors
-      socket.on('error', (error) => {
-        logger.error(`Socket error for ${socket.id}:`, error);
-      });
-    });
-
-    logger.info('WebSocket service initialized');
-  }
-
-  async handleChatMessage(socket, data, conversationId) {
-    const { message, messageId } = data;
-
-    // Validate input
-    if (!message || typeof message !== 'string') {
-      socket.emit('error', { 
-        message: 'Invalid message format',
-        code: 'INVALID_MESSAGE_FORMAT'
-      });
-      return;
     }
 
-    if (message.length > 4000) {
-      socket.emit('error', { 
-        message: 'Message too long. Maximum 4000 characters allowed.',
-        code: 'MESSAGE_TOO_LONG'
-      });
-      return;
+    async handleAudioStream(socket, data) {
+        const { audioChunk, sessionId, isFinal } = data;
+
+        // Process audio chunk (simulate processing)
+        socket.emit('audio_processed', {
+            sessionId,
+            processed: true,
+            isFinal,
+            timestamp: new Date().toISOString()
+        });
+
+        // If it's the final chunk, process the complete audio
+        if (isFinal) {
+            await this.processCompleteAudio(socket, sessionId);
+        }
     }
 
-    logger.info(`Processing chat message from ${socket.id}: ${message.substring(0, 100)}...`);
+    async processCompleteAudio(socket, sessionId) {
+        try {
+            // Simulate audio transcription
+            const transcribedText = "This is a simulated transcription of the audio input. In a real application, this would be processed by a speech-to-text service.";
+            
+            // Get AI response for the transcribed text
+            const aiResponse = await this.getAIResponse(transcribedText, sessionId);
 
-    // Send processing status
-    socket.emit('processing_start', { messageId });
+            socket.emit('audio_response', {
+                sessionId,
+                transcribedText,
+                aiResponse: aiResponse.response,
+                timestamp: new Date().toISOString()
+            });
 
-    try {
-      // Add user message to conversation
-      this.conversationService.addMessage(conversationId, 'user', message);
-
-      // Get AI response from Open Router
-      const aiResponse = await this.openRouterService.sendMessage({
-        message: message,
-        conversationId: conversationId
-      });
-
-      // Add AI response to conversation
-      this.conversationService.addMessage(conversationId, 'assistant', aiResponse.response);
-
-      // Send response back to client
-      socket.emit('chat_response', {
-        messageId,
-        response: aiResponse.response,
-        conversationId: conversationId,
-        usage: aiResponse.usage,
-        model: aiResponse.model,
-        timestamp: new Date().toISOString()
-      });
-
-      logger.info(`AI response sent for message ${messageId}`);
-
-    } catch (error) {
-      logger.error('Open Router error:', error);
-      socket.emit('error', {
-        messageId,
-        error: 'Failed to get AI response',
-        details: error.message,
-        code: 'AI_SERVICE_ERROR'
-      });
+        } catch (error) {
+            console.error('Audio processing error:', error);
+            socket.emit('error', {
+                sessionId,
+                error: 'Failed to process audio'
+            });
+        }
     }
-  }
 
-  async handleAudioStream(socket, data, conversationId) {
-    const { audioData, sessionId, isFinal } = data;
+    async getAIResponse(message, conversationId = null) {
+        try {
+            const openRouterApiKey = process.env.OPENROUTER_API_KEY;
+            if (!openRouterApiKey) {
+                throw new Error('OpenRouter API key not configured');
+            }
 
-    logger.info(`Processing audio stream: session ${sessionId}, final: ${isFinal}`);
+            const messages = [
+                {
+                    role: 'system',
+                    content: 'You are a helpful AI assistant. Provide clear, concise, and helpful responses.'
+                },
+                {
+                    role: 'user',
+                    content: message
+                }
+            ];
 
-    // Simulate audio processing (in real app, integrate with speech-to-text service)
-    // For now, we'll simulate transcription after receiving final chunk
-    socket.emit('audio_processed', {
-      sessionId,
-      processed: true,
-      isFinal,
-      timestamp: new Date().toISOString()
-    });
+            const requestBody = {
+                model: process.env.OPENROUTER_MODEL || 'openai/gpt-3.5-turbo',
+                messages: messages,
+                max_tokens: 1000,
+                temperature: 0.7,
+                stream: false
+            };
 
-    // If it's the final chunk, process the complete audio
-    if (isFinal && audioData) {
-      await this.processCompleteAudio(socket, audioData, sessionId, conversationId);
+            const response = await axios.post('https://openrouter.ai/api/v1/chat/completions', requestBody, {
+                headers: {
+                    'Authorization': `Bearer ${openRouterApiKey}`,
+                    'Content-Type': 'application/json',
+                    'HTTP-Referer': process.env.SERVER_URL || 'https://your-render-app.onrender.com',
+                    'X-Title': 'AI Voice Assistant'
+                },
+                timeout: 30000
+            });
+
+            const aiResponse = response.data.choices[0].message.content;
+
+            return {
+                response: aiResponse,
+                conversationId: conversationId || this.generateConversationId(),
+                usage: response.data.usage,
+                model: response.data.model
+            };
+
+        } catch (error) {
+            console.error('Open Router API Error:', error.response?.data || error.message);
+            
+            if (error.response?.status === 401) {
+                throw new Error('Invalid Open Router API key');
+            } else if (error.response?.status === 429) {
+                throw new Error('Rate limit exceeded for Open Router');
+            } else if (error.code === 'ECONNABORTED') {
+                throw new Error('Open Router request timeout');
+            } else {
+                throw new Error(`Open Router service error: ${error.message}`);
+            }
+        }
     }
-  }
 
-  async handleAudioChunk(socket, data, conversationId) {
-    const { chunk, sessionId, chunkIndex, isFinal } = data;
-    
-    // Process individual audio chunks for real-time transcription
-    // This is where you'd integrate with real-time speech-to-text services
-    
-    socket.emit('chunk_processed', {
-      sessionId,
-      chunkIndex,
-      processed: true,
-      isFinal,
-      timestamp: new Date().toISOString()
-    });
-  }
-
-  async processCompleteAudio(socket, audioData, sessionId, conversationId) {
-    try {
-      logger.info(`Processing complete audio for session: ${sessionId}`);
-      
-      // Simulate speech-to-text transcription
-      // In production, you would send this to a speech-to-text service
-      const transcribedText = await this.simulateSpeechToText(audioData);
-      
-      // Add user message with transcribed text to conversation
-      this.conversationService.addMessage(conversationId, 'user', transcribedText);
-
-      // Get AI response for the transcribed text
-      const aiResponse = await this.openRouterService.sendMessage({
-        message: transcribedText,
-        conversationId: conversationId
-      });
-
-      // Add AI response to conversation
-      this.conversationService.addMessage(conversationId, 'assistant', aiResponse.response);
-
-      socket.emit('audio_response', {
-        sessionId,
-        transcribedText,
-        aiResponse: aiResponse.response,
-        conversationId: conversationId,
-        usage: aiResponse.usage,
-        model: aiResponse.model,
-        timestamp: new Date().toISOString()
-      });
-
-      logger.info(`Audio response sent for session ${sessionId}`);
-
-    } catch (error) {
-      logger.error('Audio processing error:', error);
-      socket.emit('error', {
-        sessionId,
-        error: 'Failed to process audio',
-        details: error.message,
-        code: 'AUDIO_PROCESSING_ERROR'
-      });
+    async simulateSpeechToText(audioData) {
+        // Simulate speech-to-text processing
+        // In a real application, you would use Google Speech-to-Text, Whisper, etc.
+        return new Promise((resolve) => {
+            setTimeout(() => {
+                const simulatedTexts = [
+                    "Hello! How can I help you today?",
+                    "I understand you're looking for assistance.",
+                    "That's an interesting question. Let me think about it.",
+                    "I'd be happy to help with that!",
+                    "Could you please provide more details about your request?"
+                ];
+                const randomText = simulatedTexts[Math.floor(Math.random() * simulatedTexts.length)];
+                resolve(randomText);
+            }, 1000);
+        });
     }
-  }
 
-  async simulateSpeechToText(audioData) {
-    // Simulate speech-to-text processing delay
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    // Return simulated transcription
-    const sampleResponses = [
-      "Hello! How can I help you today?",
-      "I'd like to know more about artificial intelligence.",
-      "What's the weather like today?",
-      "Can you tell me a joke?",
-      "How do I build a mobile application?",
-      "What are the best practices for software development?",
-      "Explain machine learning in simple terms.",
-      "How can I improve my coding skills?"
-    ];
-    
-    return sampleResponses[Math.floor(Math.random() * sampleResponses.length)];
-  }
+    generateConversationId() {
+        return `conv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    }
 
-  initializeErrorHandling() {
-    this.app.use(errorHandler);
-  }
+    initializeErrorHandling() {
+        // Global error handling middleware
+        this.app.use((err, req, res, next) => {
+            console.error('Global error handler:', err);
 
-  start() {
-    this.server.listen(this.port, () => {
-      logger.info(`🚀 AI Voice Assistant Server running on port ${this.port}`);
-      logger.info(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
-      logger.info(`🔗 Server URL: ${process.env.SERVER_URL || `http://localhost:${this.port}`}`);
-      logger.info(`💬 WebSocket ready at: ${process.env.SERVER_URL ? process.env.SERVER_URL.replace('http', 'ws') : `ws://localhost:${this.port}`}`);
-    });
+            let error = { 
+                message: 'Internal server error', 
+                statusCode: 500,
+                code: 'INTERNAL_ERROR'
+            };
 
-    // Graceful shutdown
-    process.on('SIGTERM', () => {
-      logger.info('SIGTERM received, shutting down gracefully');
-      this.server.close(() => {
-        logger.info('Process terminated');
-      });
-    });
+            // Axios error
+            if (err.isAxiosError) {
+                error.message = 'External service error';
+                error.statusCode = 502;
+                error.code = 'EXTERNAL_SERVICE_ERROR';
+            }
 
-    process.on('uncaughtException', (error) => {
-      logger.error('Uncaught Exception:', error);
-      process.exit(1);
-    });
+            // Validation error
+            if (err.name === 'ValidationError') {
+                error.message = 'Validation failed';
+                error.statusCode = 400;
+                error.code = 'VALIDATION_ERROR';
+            }
 
-    process.on('unhandledRejection', (reason, promise) => {
-      logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
-      process.exit(1);
-    });
-  }
+            // Rate limit error
+            if (err.statusCode === 429) {
+                error.message = 'Too many requests';
+                error.statusCode = 429;
+                error.code = 'RATE_LIMIT_EXCEEDED';
+            }
+
+            const response = {
+                success: false,
+                error: error.message,
+                code: error.code,
+                ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+            };
+
+            res.status(error.statusCode).json(response);
+        });
+    }
+
+    start() {
+        this.server.listen(this.port, () => {
+            console.log(`🚀 AI Voice Assistant Server running on port ${this.port}`);
+            console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
+            console.log(`🔗 Server URL: ${process.env.SERVER_URL || `http://localhost:${this.port}`}`);
+            console.log(`👨‍💻 Developer: shone (GitHub: shawnhhh-ux)`);
+            console.log(`📚 Repository: https://github.com/shawnhhh-ux/ai-voice-assistant`);
+            console.log(`💡 Health check: ${process.env.SERVER_URL || `http://localhost:${this.port}`}/health`);
+        });
+
+        // Graceful shutdown
+        process.on('SIGTERM', () => {
+            console.log('SIGTERM received, shutting down gracefully');
+            this.server.close(() => {
+                console.log('Process terminated');
+            });
+        });
+    }
 }
 
 // Create and start server
