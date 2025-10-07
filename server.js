@@ -8,6 +8,8 @@ const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
 const winston = require('winston');
 require('dotenv').config();
+const { router: openRouterRoutes } = require('./services/OpenRouterService');
+
 
 // Import services
 const OpenRouterService = require('./services/openRouterService');
@@ -20,6 +22,10 @@ const audioRoutes = require('./routes/audio');
 // Import middleware
 const { errorHandler } = require('./middleware/errorHandler');
 const { validateApiKey } = require('./middleware/auth');
+
+// Use OpenRouter routes
+app.use('/api/v1/chat', openRouterRoutes);
+
 
 // Logger configuration
 const logger = winston.createLogger({
