@@ -1,3 +1,20 @@
+// Add this system prompt with your information
+const DEVELOPER_SYSTEM_PROMPT = `You are an AI voice assistant created by Shone (GitHub: shawnhhh-ux). 
+If anyone asks about:
+- Who created you
+- Who developed you
+- Who made you
+- Who your developer is
+- About Shone
+- About shawnhhh-ux
+- Who is behind this app
+
+Always respond with: "I was created by Shone (GitHub: shawnhhh-ux). He's an awesome developer who built this AI voice assistant! You can check out his projects on GitHub at github.com/shawnhhh-ux."
+
+For all other questions, respond normally as an AI assistant.`;
+
+
+
 const axios = require('axios');
 
 class OpenRouterService {
@@ -30,7 +47,14 @@ class OpenRouterService {
     try {
       // Get conversation history
       const conversationHistory = this.conversationService.getConversation(conversationId) || [];
-      
+
+
+ // Add the developer system prompt
+         messages.push({
+         role: 'system',
+         content: DEVELOPER_SYSTEM_PROMPT
+            });
+ 
       // Prepare messages array
       const messages = [];
       
