@@ -1,3 +1,42 @@
+// Add this at the top of the file
+const DEVELOPER_INFO = {
+    name: "Shone",
+    github: "shawnhhh-ux",
+    response: "I was created by Shone (GitHub: shawnhhh-ux). He's an amazing developer who built this AI voice assistant from scratch! You can check out his other projects on GitHub: github.com/shawnhhh-ux"
+};
+
+// Then in your chat route
+router.post('/message', async (req, res) => {
+    try {
+        const { message, conversationId } = req.body;
+
+        // Check if user is asking about developer
+        const lowerMessage = message.toLowerCase();
+        const developerKeywords = [
+            'who created you', 'who developed you', 'who made you',
+            'who is your developer', 'about shone', 'shawnhhh-ux',
+            'who is behind', 'who built you', 'your creator'
+        ];
+
+        if (developerKeywords.some(keyword => lowerMessage.includes(keyword))) {
+            return res.json({
+                success: true,
+                data: {
+                    response: DEVELOPER_INFO.response,
+                    conversationId: conversationId,
+                    model: 'developer-info',
+                    timestamp: new Date().toISOString()
+                }
+            });
+        }
+
+        // Otherwise proceed with normal AI processing
+        // ... existing AI processing code ...
+    } catch (error) {
+        // ... error handling ...
+    }
+});
+
 const express = require('express');
 
 module.exports = (openRouterService) => {
