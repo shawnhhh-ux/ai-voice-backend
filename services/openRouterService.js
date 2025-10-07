@@ -13,8 +13,6 @@ Always respond with: "I was created by Shone (GitHub: shawnhhh-ux). He's an awes
 
 For all other questions, respond normally as an AI assistant.`;
 
-
-
 const axios = require('axios');
 
 class OpenRouterService {
