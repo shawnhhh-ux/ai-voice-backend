@@ -1,6 +1,4 @@
-const express = require('express');
 const axios = require('axios');
-const router = express.Router();
 
 /**
  * OpenRouter Service for AI Voice Assistant
@@ -15,7 +13,7 @@ class OpenRouterService {
     constructor() {
         this.apiKey = process.env.OPENROUTER_API_KEY;
         this.baseURL = process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1';
-        this.model = process.env.OPENROUTER_MODEL || 'mistralai/mistral-nemo:free';
+        this.model = process.env.OPENROUTER_MODEL || 'openai/gpt-3.5-turbo';
         
         if (!this.apiKey) {
             throw new Error('OPENROUTER_API_KEY is required in environment variables');
@@ -34,7 +32,7 @@ class OpenRouterService {
             headers: {
                 'Authorization': `Bearer ${this.apiKey}`,
                 'Content-Type': 'application/json',
-                'HTTP-Referer': process.env.SERVER_URL || 'https://ai-voice-backend-apq3.onrender.com',
+                'HTTP-Referer': process.env.SERVER_URL || 'https://your-render-app.onrender.com',
                 'X-Title': this.developerInfo.project,
                 'X-Developer': this.developerInfo.name,
                 'X-GitHub': this.developerInfo.github
@@ -45,7 +43,16 @@ class OpenRouterService {
         console.log('OpenRouterService initialized by', this.developerInfo.name);
     }
 
-    async sendMessage({ message, conversationId, systemPrompt }) {
+    /**
+     * Send a message to OpenRouter AI and get response
+     * @param {Object} params - Message parameters
+     * @param {string} params.message - User message
+     * @param {string} params.conversationId - Conversation ID for context
+     * @param {string} params.sessionId - Session ID for tracking
+     * @param {string} params.systemPrompt - System prompt for AI behavior
+     * @returns {Promise<Object>} AI response
+     */
+    async sendMessage({ message, conversationId, sessionId, systemPrompt }) {
         try {
             const messages = [];
 
@@ -71,11 +78,13 @@ class OpenRouterService {
                 stream: false
             };
 
-            console.log(`Sending request to Open Router from ${this.developerInfo.name}: ${message.substring(0, 100)}...`);
+            console.log(`[OpenRouter] Sending message from ${this.developerInfo.name}: ${message.substring(0, 100)}...`);
 
             const response = await this.client.post('/chat/completions', requestBody);
 
             const aiResponse = response.data.choices[0].message.content;
+
+            console.log(`[OpenRouter] Response received by ${this.developerInfo.github}`);
 
             return {
                 success: true,
@@ -90,9 +99,9 @@ class OpenRouterService {
             };
 
         } catch (error) {
-            console.error('Open Router API Error:', error.response?.data || error.message);
+            console.error('[OpenRouter] API Error:', error.response?.data || error.message);
             
-            let errorMessage = 'Open Router service error';
+            let errorMessage = 'AI service error';
             let statusCode = 500;
 
             if (error.response?.status === 401) {
@@ -104,6 +113,8 @@ class OpenRouterService {
             } else if (error.code === 'ECONNABORTED') {
                 errorMessage = 'Open Router request timeout';
                 statusCode = 504;
+            } else {
+                errorMessage = `Open Router service error: ${error.message}`;
             }
 
             return {
@@ -115,6 +126,15 @@ class OpenRouterService {
         }
     }
 
+    /**
+     * Stream AI response for real-time updates
+     * @param {Object} params - Stream parameters
+     * @param {string} params.message - User message
+     * @param {string} params.conversationId - Conversation ID
+     * @param {Function} params.onChunk - Callback for each chunk
+     * @param {Function} params.onComplete - Callback when complete
+     * @param {Function} params.onError - Callback for errors
+     */
     async streamMessage({ message, conversationId, onChunk, onComplete, onError }) {
         try {
             const messages = [{
@@ -129,6 +149,8 @@ class OpenRouterService {
                 temperature: 0.7,
                 stream: true
             };
+
+            console.log(`[OpenRouter] Streaming message from ${this.developerInfo.github}`);
 
             const response = await this.client.post('/chat/completions', requestBody, {
                 responseType: 'stream'
@@ -157,6 +179,7 @@ class OpenRouterService {
             });
 
             response.data.on('end', () => {
+                console.log(`[OpenRouter] Stream completed for ${this.developerInfo.name}`);
                 onComplete({
                     fullResponse,
                     conversationId: conversationId || this.generateId(),
@@ -165,37 +188,44 @@ class OpenRouterService {
             });
 
             response.data.on('error', (error) => {
+                console.error('[OpenRouter] Stream error:', error);
                 onError(error);
             });
 
         } catch (error) {
+            console.error('[OpenRouter] Stream initialization error:', error);
             onError(error);
         }
     }
 
+    /**
+     * Process audio transcription and get AI response
+     * @param {string} audioData - Base64 encoded audio data
+     * @param {string} sessionId - Session ID
+     * @returns {Promise<Object>} Processed response with transcription and AI reply
+     */
     async processAudio(audioData, sessionId) {
         try {
-            console.log(`Processing audio from ${this.developerInfo.name}, session: ${sessionId}`);
+            console.log(`[OpenRouter] Processing audio for session: ${sessionId} by ${this.developerInfo.github}`);
+
+            // Note: OpenRouter doesn't directly process audio
+            // You would need to use a speech-to-text service first
+            // For now, we'll simulate audio processing
             
-            // For now, we'll simulate audio processing and use a text message
-            // In a real implementation, you would:
-            // 1. Convert audio to text using a speech-to-text service
-            // 2. Send the text to Open Router
-            // 3. Return the AI response
+            // Simulate speech-to-text processing
+            const transcribedText = await this.simulateSpeechToText(audioData);
             
-            const simulatedText = "I received your audio message. This is a simulated response. In a real implementation, I would transcribe your audio and respond accordingly.";
-            
+            // Get AI response for transcribed text
             const aiResponse = await this.sendMessage({
-                message: simulatedText,
-                conversationId: sessionId,
-                systemPrompt: "You are a helpful AI assistant. The user is sending audio messages which are being converted to text. Respond naturally and helpfully."
+                message: transcribedText,
+                sessionId: sessionId
             });
 
             return {
                 success: true,
                 data: {
-                    transcribedText: "User audio message (simulated transcription)",
-                    response: aiResponse.data?.response || "I'm here to help!",
+                    transcribedText: transcribedText,
+                    response: aiResponse.data?.response || 'No response generated',
                     sessionId: sessionId,
                     developer: this.developerInfo.name,
                     github: this.developerInfo.github
@@ -203,28 +233,57 @@ class OpenRouterService {
             };
 
         } catch (error) {
-            console.error('Audio processing error:', error);
+            console.error('[OpenRouter] Audio processing error:', error);
             return {
                 success: false,
-                error: 'Failed to process audio',
+                error: 'Audio processing failed',
                 code: 'AUDIO_PROCESSING_ERROR',
                 developer: this.developerInfo.name
             };
         }
     }
 
+    /**
+     * Simulate speech-to-text processing
+     * @param {string} audioData - Base64 audio data
+     * @returns {Promise<string>} Transcribed text
+     */
+    async simulateSpeechToText(audioData) {
+        // In a real implementation, you would use:
+        // - Google Speech-to-Text
+        // - Azure Speech Services
+        // - AWS Transcribe
+        // - Whisper API
+        
+        console.log(`[OpenRouter] Simulating STT for audio length: ${audioData?.length || 0} by ${this.developerInfo.github}`);
+        
+        // Simulate processing delay
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Return simulated transcription
+        return "This is a simulated transcription of the audio. In a real implementation, this would be the actual transcribed text from the audio input.";
+    }
+
+    /**
+     * Get available models from OpenRouter
+     * @returns {Promise<Array>} List of available models
+     */
     async getAvailableModels() {
         try {
+            console.log(`[OpenRouter] Fetching models by ${this.developerInfo.name}`);
+            
             const response = await this.client.get('/models');
             return {
                 success: true,
                 data: {
                     models: response.data.data,
-                    developer: this.developerInfo.name
+                    total: response.data.data.length,
+                    developer: this.developerInfo.name,
+                    github: this.developerInfo.github
                 }
             };
         } catch (error) {
-            console.error('Error fetching models:', error);
+            console.error('[OpenRouter] Error fetching models:', error);
             return {
                 success: false,
                 error: 'Failed to fetch models',
@@ -233,202 +292,29 @@ class OpenRouterService {
         }
     }
 
+    /**
+     * Get service information and developer credits
+     * @returns {Object} Service information
+     */
+    getServiceInfo() {
+        return {
+            service: 'OpenRouter AI Service',
+            version: '1.0.0',
+            developer: this.developerInfo.name,
+            github: this.developerInfo.github,
+            repository: this.developerInfo.repository,
+            supported_models: [this.model],
+            features: ['chat', 'streaming', 'audio_processing']
+        };
+    }
+
+    /**
+     * Generate unique ID
+     * @returns {string} Unique identifier
+     */
     generateId() {
         return `conv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     }
-
-    getDeveloperInfo() {
-        return this.developerInfo;
-    }
 }
 
-// Create router and define routes
-router.post('/message', async (req, res) => {
-    try {
-        const { message, conversationId, systemPrompt } = req.body;
-
-        // Validate request
-        if (!message || typeof message !== 'string') {
-            return res.status(400).json({
-                success: false,
-                error: 'Message is required and must be a string',
-                code: 'INVALID_MESSAGE'
-            });
-        }
-
-        if (message.length > 4000) {
-            return res.status(400).json({
-                success: false,
-                error: 'Message too long. Maximum 4000 characters allowed.',
-                code: 'MESSAGE_TOO_LONG'
-            });
-        }
-
-        console.log(`Processing chat message from ${req.ip}: ${message.substring(0, 100)}...`);
-
-        const openRouterService = new OpenRouterService();
-        const response = await openRouterService.sendMessage({
-            message,
-            conversationId,
-            systemPrompt
-        });
-
-        if (response.success) {
-            res.json(response);
-        } else {
-            res.status(500).json(response);
-        }
-
-    } catch (error) {
-        console.error('Chat route error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Internal server error',
-            code: 'SERVER_ERROR',
-            developer: 'shone (shawnhhh-ux)'
-        });
-    }
-});
-
-router.post('/audio/process', async (req, res) => {
-    try {
-        const { audioData, sessionId } = req.body;
-
-        if (!audioData || !sessionId) {
-            return res.status(400).json({
-                success: false,
-                error: 'audioData and sessionId are required',
-                code: 'INVALID_AUDIO_REQUEST'
-            });
-        }
-
-        console.log(`Processing audio request, session: ${sessionId}`);
-
-        const openRouterService = new OpenRouterService();
-        const response = await openRouterService.processAudio(audioData, sessionId);
-
-        if (response.success) {
-            res.json(response);
-        } else {
-            res.status(500).json(response);
-        }
-
-    } catch (error) {
-        console.error('Audio route error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Internal server error processing audio',
-            code: 'AUDIO_SERVER_ERROR',
-            developer: 'shone (shawnhhh-ux)'
-        });
-    }
-});
-
-router.post('/stream', async (req, res) => {
-    try {
-        const { message, conversationId } = req.body;
-
-        if (!message) {
-            return res.status(400).json({ 
-                success: false,
-                error: 'Message is required',
-                code: 'INVALID_MESSAGE'
-            });
-        }
-
-        // Set headers for Server-Sent Events
-        res.writeHead(200, {
-            'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
-            'Access-Control-Allow-Origin': '*',
-            'X-Developer': 'shone (shawnhhh-ux)'
-        });
-
-        const openRouterService = new OpenRouterService();
-        
-        await openRouterService.streamMessage({
-            message,
-            conversationId,
-            onChunk: (chunk) => {
-                res.write(`data: ${JSON.stringify({ chunk, type: 'content' })}\n\n`);
-            },
-            onComplete: (result) => {
-                res.write(`data: ${JSON.stringify({ 
-                    type: 'complete', 
-                    conversationId: result.conversationId,
-                    developer: result.developer
-                })}\n\n`);
-                res.end();
-            },
-            onError: (error) => {
-                res.write(`data: ${JSON.stringify({ 
-                    type: 'error', 
-                    error: 'Streaming failed',
-                    developer: 'shone (shawnhhh-ux)'
-                })}\n\n`);
-                res.end();
-            }
-        });
-
-    } catch (error) {
-        console.error('Stream route error:', error);
-        res.status(500).json({ 
-            success: false,
-            error: 'Stream initialization failed',
-            developer: 'shone (shawnhhh-ux)'
-        });
-    }
-});
-
-router.get('/models', async (req, res) => {
-    try {
-        const openRouterService = new OpenRouterService();
-        const response = await openRouterService.getAvailableModels();
-        
-        if (response.success) {
-            res.json(response);
-        } else {
-            res.status(500).json(response);
-        }
-    } catch (error) {
-        console.error('Models route error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to fetch models',
-            developer: 'shone (shawnhhh-ux)'
-        });
-    }
-});
-
-router.get('/developer', (req, res) => {
-    const openRouterService = new OpenRouterService();
-    const developerInfo = openRouterService.getDeveloperInfo();
-    
-    res.json({
-        success: true,
-        data: {
-            developer: developerInfo.name,
-            github: developerInfo.github,
-            repository: developerInfo.repository,
-            project: developerInfo.project,
-            message: 'AI Voice Assistant powered by OpenRouter API'
-        }
-    });
-});
-
-// Health check endpoint
-router.get('/health', (req, res) => {
-    res.json({
-        success: true,
-        message: 'OpenRouter Service is running',
-        developer: 'shone (shawnhhh-ux)',
-        timestamp: new Date().toISOString(),
-        github: 'https://github.com/shawnhhh-ux/ai-voice-assistant'
-    });
-});
-
-module.exports = {
-    router,
-    OpenRouterService
-};
+module.exports = OpenRouterService;
