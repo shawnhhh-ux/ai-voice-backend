@@ -2,23 +2,18 @@ const express = require('express');
 const router = express.Router();
 const OpenRouterService = require('../services/OpenRouterService');
 
-// Initialize the service
+// Initialize OpenRouter service
 const openRouterService = new OpenRouterService();
 
-// GET /api/info - Get service information
-router.get('/info', (req, res) => {
-    const serviceInfo = openRouterService.getServiceInfo();
-    res.json({
-        success: true,
-        data: serviceInfo
-    });
-});
-
-// POST /api/v1/chat/message - Send a text message
+/**
+ * POST /api/v1/chat/message
+ * Send a text message and get AI response
+ */
 router.post('/message', async (req, res) => {
     try {
         const { message, conversationId, systemPrompt } = req.body;
 
+        // Validate request
         if (!message || typeof message !== 'string') {
             return res.status(400).json({
                 success: false,
@@ -27,7 +22,15 @@ router.post('/message', async (req, res) => {
             });
         }
 
-        console.log(`Processing chat message from client: ${message.substring(0, 100)}...`);
+        if (message.length > 4000) {
+            return res.status(400).json({
+                success: false,
+                error: 'Message too long. Maximum 4000 characters allowed.',
+                code: 'MESSAGE_TOO_LONG'
+            });
+        }
+
+        console.log(`Processing chat message: ${message.substring(0, 100)}...`);
 
         const response = await openRouterService.sendMessage({
             message,
@@ -36,9 +39,21 @@ router.post('/message', async (req, res) => {
         });
 
         if (response.success) {
-            res.json(response);
+            res.json({
+                success: true,
+                data: response.data,
+                developer: {
+                    name: 'shone',
+                    github: 'shawnhhh-ux',
+                    repository: 'https://github.com/shawnhhh-ux/ai-voice-assistant'
+                }
+            });
         } else {
-            res.status(500).json(response);
+            res.status(500).json({
+                success: false,
+                error: response.error,
+                code: response.code
+            });
         }
 
     } catch (error) {
@@ -51,55 +66,108 @@ router.post('/message', async (req, res) => {
     }
 });
 
-// POST /api/v1/audio/process - Process audio data
-router.post('/process', async (req, res) => {
+/**
+ * POST /api/v1/chat/audio
+ * Process audio and get AI response
+ */
+router.post('/audio', async (req, res) => {
     try {
         const { audioData, sessionId } = req.body;
 
-        if (!audioData || !sessionId) {
+        if (!audioData) {
             return res.status(400).json({
                 success: false,
-                error: 'Audio data and session ID are required',
-                code: 'INVALID_AUDIO_DATA'
+                error: 'Audio data is required',
+                code: 'MISSING_AUDIO_DATA'
             });
         }
 
-        console.log(`Processing audio data for session: ${sessionId}`);
+        console.log(`Processing audio request, session: ${sessionId}`);
 
-        const response = await openRouterService.processAudio(audioData, sessionId);
+        const response = await openRouterService.processAudio({
+            audioData,
+            sessionId
+        });
 
         if (response.success) {
-            res.json(response);
+            res.json({
+                success: true,
+                data: response.data,
+                developer: {
+                    name: 'shone',
+                    github: 'shawnhhh-ux',
+                    repository: 'https://github.com/shawnhhh-ux/ai-voice-assistant'
+                }
+            });
         } else {
-            res.status(500).json(response);
+            res.status(500).json({
+                success: false,
+                error: response.error,
+                code: response.code
+            });
         }
 
     } catch (error) {
-        console.error('Audio processing route error:', error);
+        console.error('Audio route error:', error);
         res.status(500).json({
             success: false,
-            error: 'Audio processing failed',
-            code: 'AUDIO_PROCESSING_ERROR'
+            error: 'Internal server error',
+            code: 'SERVER_ERROR'
         });
     }
 });
 
-// GET /api/v1/models - Get available AI models
+/**
+ * GET /api/v1/chat/models
+ * Get available AI models
+ */
 router.get('/models', async (req, res) => {
     try {
-        const response = await openRouterService.getAvailableModels();
+        const models = await openRouterService.getAvailableModels();
         
-        if (response.success) {
-            res.json(response);
-        } else {
-            res.status(500).json(response);
-        }
+        res.json({
+            success: true,
+            data: {
+                models: models.slice(0, 20), // Return first 20 models
+                total: models.length
+            },
+            developer: {
+                name: 'shone',
+                github: 'shawnhhh-ux',
+                repository: 'https://github.com/shawnhhh-ux/ai-voice-assistant'
+            }
+        });
     } catch (error) {
         console.error('Models route error:', error);
         res.status(500).json({
             success: false,
-            error: 'Failed to fetch models',
-            code: 'MODELS_FETCH_ERROR'
+            error: 'Failed to fetch models'
+        });
+    }
+});
+
+/**
+ * GET /api/v1/chat/info
+ * Get service information
+ */
+router.get('/info', async (req, res) => {
+    try {
+        const serviceInfo = openRouterService.getServiceInfo();
+        const validation = await openRouterService.validateConnection();
+        
+        res.json({
+            success: true,
+            data: {
+                service: serviceInfo,
+                connection: validation,
+                timestamp: new Date().toISOString()
+            }
+        });
+    } catch (error) {
+        console.error('Info route error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get service info'
         });
     }
 });
